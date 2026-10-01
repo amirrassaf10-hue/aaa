@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تست TURN</title>
+<style>
+body{margin:0;background:#101114;color:#fff;font-family:Arial,sans-serif;text-align:center;padding:30px}
+.box{max-width:700px;margin:auto;background:#1b1d22;border-radius:16px;padding:24px}
+#result{font-size:25px;font-weight:bold;margin:25px 0}
+.ok{color:#55e391}.bad{color:#ff6565}.wait{color:#ffd45a}
+button{padding:12px 22px;border:0;border-radius:10px;font-size:16px;cursor:pointer}
+pre{direction:ltr;text-align:left;background:#0b0c0e;padding:15px;border-radius:10px;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<div class="box">
+<h2>تست اتصال TURN</h2>
+<p>این صفحه بررسی می‌کند آیا مرورگر می‌تواند از سرور TURN استفاده کند یا نه.</p>
+<div id="result" class="wait">در حال تست...</div>
+<button onclick="runTest()">تست دوباره</button>
+<pre id="details">لطفاً چند ثانیه صبر کنید...</pre>
+</div>
+<script>
+const iceServers=[
+ {urls:"stun:stun.relay.metered.ca:80"},
+ {urls:"turn:global.relay.metered.ca:80",username:"862ddd91337545f849e0d691",credential:"xw2Kc2SaP7mcjPZo"},
+ {urls:"turn:global.relay.metered.ca:80?transport=tcp",username:"862ddd91337545f849e0d691",credential:"xw2Kc2SaP7mcjPZo"},
+ {urls:"turn:global.relay.metered.ca:443",username:"862ddd91337545f849e0d691",credential:"xw2Kc2SaP7mcjPZo"},
+ {urls:"turns:global.relay.metered.ca:443?transport=tcp",username:"862ddd91337545f849e0d691",credential:"xw2Kc2SaP7mcjPZo"}
+];
+let pc=null;
+async function runTest(){
+ const r=document.getElementById('result'),d=document.getElementById('details');
+ r.className='wait';r.textContent='⏳ در حال تست TURN...';d.textContent='در حال جمع‌آوری ICE candidate ها...';
+ if(pc){try{pc.close()}catch(e){}}
+ pc=new RTCPeerConnection({iceServers});
+ const found=new Set();
+ const lines=[];
+ pc.createDataChannel('turn-test');
+ pc.onicecandidate=e=>{
+   if(!e.candidate)return;
+   const c=e.candidate.candidate||'';
+   lines.push(c);
+   const m=c.match(/ typ ([a-z0-9]+)/i);
+   if(m) found.add(m[1].toLowerCase());
+   d.textContent='Candidateهای پیدا شده:\n'+[...found].join(', ')+'\n\n'+lines.join('\n');
+ };
+ pc.onicecandidateerror=e=>{
+   lines.push('ICE error '+e.errorCode+' '+(e.errorText||''));
+ };
+ try{
+   const offer=await pc.createOffer();
+   await pc.setLocalDescription(offer);
+ }catch(e){
+   r.className='bad';r.textContent='❌ خطا در شروع تست';d.textContent=e.stack||e.message;return;
+ }
+ await new Promise(resolve=>setTimeout(resolve,10000));
+ if(found.has('relay')){
+   r.className='ok';r.textContent='🟢 TURN Relay: OK';
+   d.textContent='TURN با موفقیت candidate از نوع relay ساخته است.\n\n'+lines.join('\n');
+ }else{
+   r.className='bad';r.textContent='🔴 TURN Relay: FAILED';
+   d.textContent='هیچ candidate از نوع relay پیدا نشد.\n\nانواع پیدا شده: '+([...found].join(', ')||'هیچ‌کدام')+'\n\n'+lines.join('\n');
+ }
+ pc.close();
+}
+runTest();
+</script>
+</body>
+</html>
