@@ -1,0 +1,64 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تماس تصویری</title><style>body{font-family:Arial;background:#111;color:#fff;text-align:center;margin:0;padding:20px}input,button{padding:12px;margin:5px;font-size:16px;border-radius:8px;border:0}button{cursor:pointer}video{width:46%;max-width:560px;background:#000;border-radius:12px;margin:8px}#code{font-size:28px;color:#4ade80;font-weight:bold}</style></head><body><h2>تماس تصویری</h2><p>کد شما:</p><div id="code">...</div><input id="remote" inputmode="numeric" maxlength="3" placeholder="کد ۳ رقمی طرف مقابل"><br><button id="start">فعال کردن دوربین</button><button id="call" disabled>اتصال</button><p id="status">در حال آماده‌سازی...</p><video id="me" autoplay muted playsinline></video><video id="you" autoplay playsinline></video><script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script><script>
+const ICE={iceServers:[
+ {urls:'stun:stun.relay.metered.ca:80'},
+ {urls:'turn:global.relay.metered.ca:80',username:'efcfeb545e453332b5c7a90b',credential:'NrZzy/0mimKCuA8R'},
+ {urls:'turn:global.relay.metered.ca:80?transport=tcp',username:'efcfeb545e453332b5c7a90b',credential:'NrZzy/0mimKCuA8R'},
+ {urls:'turn:global.relay.metered.ca:443',username:'efcfeb545e453332b5c7a90b',credential:'NrZzy/0mimKCuA8R'},
+ {urls:'turns:global.relay.metered.ca:443?transport=tcp',username:'efcfeb545e453332b5c7a90b',credential:'NrZzy/0mimKCuA8R'}
+]};
+const chars='0123456789';
+const $=id=>document.getElementById(id);
+let media=null,peer=null,currentCall=null;
+function makeCode(){return Array.from({length:3},()=>chars[Math.floor(Math.random()*10)]).join('')}
+function setupPeer(){
+ peer.on('call',call=>{
+  if(!media){call.close();return}
+  if(currentCall)try{currentCall.close()}catch{}
+  currentCall=call;
+  call.answer(media);
+  call.on('stream',v=>{$('you').srcObject=v;v.play().catch(()=>{});$('status').textContent='تماس برقرار شد ✅'});
+  call.on('close',()=>{$('you').srcObject=null;$('status').textContent='تماس پایان یافت'});
+  call.on('error',e=>$('status').textContent='خطای تماس: '+e.type);
+ });
+ peer.on('disconnected',()=>{$('status').textContent='اتصال به سرور قطع شد؛ تلاش مجدد...';setTimeout(()=>peer&&peer.reconnect(),1000)});
+ peer.on('error',e=>$('status').textContent='خطا: '+e.type);
+}
+async function makePeer(){
+ for(let i=0;i<30;i++){
+  const id=makeCode();
+  const candidate=new Peer(id,{config:ICE,debug:1});
+  const result=await new Promise(resolve=>{
+   let settled=false;
+   candidate.once('open',()=>{if(!settled){settled=true;resolve({ok:true})}});
+   candidate.once('error',e=>{if(!settled){settled=true;resolve({ok:false,error:e})}});
+  });
+  if(result.ok){peer=candidate;$('code').textContent=id;setupPeer();return true}
+  try{candidate.destroy()}catch{}
+  if(result.error?.type!=='unavailable-id')throw result.error;
+ }
+ throw Error('کد ۳ رقمی آزاد پیدا نشد؛ دوباره صفحه را باز کن');
+}
+$('start').onclick=async()=>{
+ try{
+  $('start').disabled=true;
+  $('status').textContent='در حال فعال کردن دوربین و اتصال...';
+  media=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:true});
+  $('me').srcObject=media;
+  await makePeer();
+  $('call').disabled=false;
+  $('status').textContent='آماده؛ کد ۳ رقمی را برای طرف مقابل بفرست.';
+ }catch(e){$('start').disabled=false;$('status').textContent=e.message||String(e)}
+};
+$('call').onclick=()=>{
+ const id=$('remote').value.trim();
+ if(!/^\d{3}$/.test(id))return $('status').textContent='کد باید دقیقاً ۳ رقم باشد';
+ if(!peer||!media)return $('status').textContent='اول دوربین را فعال کن';
+ if(id===peer.id)return $('status').textContent='کد خودت را وارد نکن';
+ if(currentCall)try{currentCall.close()}catch{}
+ currentCall=peer.call(id,media);
+ $('status').textContent='در حال اتصال...';
+ currentCall.on('stream',v=>{$('you').srcObject=v;v.play().catch(()=>{});$('status').textContent='تماس برقرار شد ✅'});
+ currentCall.on('close',()=>{$('you').srcObject=null;$('status').textContent='تماس پایان یافت'});
+ currentCall.on('error',e=>$('status').textContent='خطای تماس: '+e.type);
+};
+</script></body></html>
