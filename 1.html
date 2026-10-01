@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تماس تصویری</title>
+<style>
+body{font-family:Arial,sans-serif;background:#111;color:#fff;text-align:center;margin:0;padding:18px}
+.wrap{max-width:900px;margin:auto}h2{margin:8px 0 14px}
+#code{font-size:34px;font-weight:bold;letter-spacing:6px;color:#4ade80;margin:8px}
+input,button{padding:12px;margin:5px;font-size:16px;border-radius:9px;border:0}
+button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
+input{width:170px;text-align:center;letter-spacing:4px}
+video{width:46%;max-width:600px;min-height:180px;background:#000;border-radius:12px;margin:8px;object-fit:cover}
+#status{min-height:24px}
+.small{color:#aaa;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2>📹 تماس تصویری</h2>
+<p>کد سه‌رقمی شما:</p>
+<div id="code">...</div>
+<button id="start">🎥 فعال کردن دوربین و میکروفون</button>
+<br>
+<input id="remote" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="کد طرف مقابل">
+<button id="call" disabled>📞 اتصال</button>
+<p id="status">ابتدا دوربین و میکروفون را فعال کن.</p>
+<video id="me" autoplay muted playsinline></video>
+<video id="you" autoplay playsinline></video>
+<p class="small">برای تماس بین اینترنت‌های مختلف، صفحه را با HTTPS باز کن.</p>
+</div>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+
+// TURN credential supplied from Metered.
+// If this credential is rotated in Metered, replace USERNAME and CREDENTIAL below.
+const ICE_SERVERS = [
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:global.relay.metered.ca:80', username: 'efcfeb545e453332b5c7a90b', credential: 'NrZzy/0mimKCuA8R' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'efcfeb545e453332b5c7a90b', credential: 'NrZzy/0mimKCuA8R' },
+  { urls: 'turn:global.relay.metered.ca:443', username: 'efcfeb545e453332b5c7a90b', credential: 'NrZzy/0mimKCuA8R' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'efcfeb545e453332b5c7a90b', credential: 'NrZzy/0mimKCuA8R' }
+];
+
+const $ = id => document.getElementById(id);
+let peer = null, media = null, currentCall = null, starting = false;
+
+function make3DigitCode(){
+  const a = new Uint32Array(3);
+  crypto.getRandomValues(a);
+  return Array.from(a, n => String(n % 10)).join('');
+}
+
+function setStatus(t){ $('status').textContent = t; }
+
+function setupPeerEvents(){
+  peer.on('call', call => {
+    if (!media) { call.close(); setStatus('ابتدا دوربین و میکروفون را فعال کن.'); return; }
+    if (currentCall) { try{currentCall.close()}catch(e){} }
+    currentCall = call;
+    call.answer(media);
+    setStatus('📡 تماس ورودی؛ در حال برقراری اتصال...');
+    call.on('stream', stream => {
+      $('you').srcObject = stream;
+      $('you').play().catch(()=>{});
+      setStatus('✅ تماس برقرار شد');
+    });
+    call.on('close', () => { $('you').srcObject = null; setStatus('تماس پایان یافت.'); });
+    call.on('error', e => setStatus('❌ خطای تماس: ' + (e.type || e.message || 'unknown')));
+  });
+  peer.on('disconnected', () => {
+    setStatus('🔄 ارتباط با سرور قطع شد؛ تلاش برای اتصال مجدد...');
+    setTimeout(() => { if (peer && !peer.destroyed) try{peer.reconnect()}catch(e){} }, 1000);
+  });
+  peer.on('close', () => setStatus('ارتباط با سرور بسته شد. صفحه را دوباره باز کن.'));
+  peer.on('error', e => {
+    if (e.type === 'unavailable-id') return;
+    setStatus('❌ خطا: ' + (e.type || e.message || 'unknown'));
+  });
+}
+
+async function createPeerWithFreeCode(){
+  for(let attempt=0; attempt<30; attempt++){
+    const id = make3DigitCode();
+    const candidate = new Peer(id, {
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true,
+      path: '/',
+      config: {
+        iceServers: ICE_SERVERS,
+        iceTransportPolicy: 'all',
+        sdpSemantics: 'unified-plan',
+        iceCandidatePoolSize: 4
+      },
+      debug: 1
+    });
+
+    try {
+      await new Promise((resolve,reject)=>{
+        let finished=false;
+        const ok=()=>{ if(!finished){finished=true;resolve();} };
+        const bad=e=>{ if(!finished){finished=true;reject(e);} };
+        candidate.once('open',ok);
+        candidate.once('error',bad);
+      });
+      peer = candidate;
+      $('code').textContent = id;
+      setupPeerEvents();
+      return;
+    } catch(e) {
+      try{candidate.destroy()}catch(x){}
+      if(e && e.type === 'unavailable-id') continue;
+      throw e;
+    }
+  }
+  throw new Error('کد سه‌رقمی آزاد پیدا نشد؛ صفحه را دوباره باز کن.');
+}
+
+$('start').onclick = async () => {
+  if(starting || media) return;
+  starting = true;
+  $('start').disabled = true;
+  setStatus('🎥 در حال گرفتن اجازه دوربین و میکروفون...');
+  try{
+    if(!window.isSecureContext){
+      throw new Error('این صفحه HTTPS نیست. فایل را روی یک سایت HTTPS اجرا کن.');
+    }
+    media = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    $('me').srcObject = media;
+    setStatus('🌐 در حال اتصال به PeerJS و آماده‌سازی TURN...');
+    await createPeerWithFreeCode();
+    $('call').disabled = false;
+    setStatus('✅ آماده؛ کد سه‌رقمی را برای طرف مقابل بفرست.');
+  }catch(e){
+    if(media){ media.getTracks().forEach(t=>t.stop()); media=null; }
+    $('start').disabled=false;
+    setStatus('❌ ' + (e.message || String(e)));
+  }finally{ starting=false; }
+};
+
+$('call').onclick = () => {
+  const id = $('remote').value.replace(/\D/g,'').slice(0,3);
+  $('remote').value=id;
+  if(!/^\d{3}$/.test(id)){ setStatus('کد طرف مقابل باید دقیقاً ۳ رقم باشد.'); return; }
+  if(!peer || !media){ setStatus('ابتدا دوربین و میکروفون را فعال کن.'); return; }
+  if(id === peer.id){ setStatus('❌ کد خودت را وارد نکن.'); return; }
+  if(currentCall){ try{currentCall.close()}catch(e){} }
+  currentCall = peer.call(id, media, {metadata:{type:'video-call'}});
+  setStatus('📡 در حال برقراری تماس...');
+  currentCall.on('stream', stream => {
+    $('you').srcObject = stream;
+    $('you').play().catch(()=>{});
+    setStatus('✅ تماس برقرار شد');
+  });
+  currentCall.on('close',()=>setStatus('تماس پایان یافت.'));
+  currentCall.on('error',e=>setStatus('❌ خطای تماس: '+(e.type||e.message||'unknown')));
+};
+</script>
+</body>
+</html>
